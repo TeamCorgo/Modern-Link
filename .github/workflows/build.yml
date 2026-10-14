@@ -6,9 +6,6 @@ name: Build image
 
 on:
   workflow_dispatch:
-  # TEMPORARY: test run before merge, removed in the next commit
-  push:
-    branches: [claude/zealous-einstein-jsp5jo]
 
 jobs:
   build:
