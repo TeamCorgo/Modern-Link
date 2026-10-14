@@ -1,0 +1,94 @@
+name: Build image
+
+# Builds steamlink-debian.img.xz on Debian and publishes it as a GitHub Release.
+# Run it from the Actions tab. The kernel is kept in the Actions cache and only
+# recompiled when kernel/ changes.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    container:
+      image: debian:trixie
+      # Needed to register QEMU for ARM and to mount /proc etc. in the chroot
+      options: --privileged
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            arch-test bc bison ca-certificates curl dosfstools e2fsprogs fdisk flex gcc git \
+            gh kmod libc6-dev libelf-dev libssl-dev make mmdebstrap perl qemu-user-static xz-utils
+
+      - uses: actions/checkout@v5
+
+      - name: Enable ARM emulation
+        run: |
+          binfmt=/proc/sys/fs/binfmt_misc
+          [ -e "$binfmt/register" ] || mount -t binfmt_misc binfmt_misc "$binfmt"
+          if [ ! -e "$binfmt/qemu-arm" ]; then
+            qemu=$(command -v qemu-arm-static || command -v qemu-arm)
+            printf '%s' ":qemu-arm:M::\x7fELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:$qemu:F" > "$binfmt/register"
+          fi
+          arch-test armhf
+
+      - name: Restore kernel
+        id: kernel
+        uses: actions/cache@v5
+        with:
+          path: out/kernel
+          key: kernel-${{ hashFiles('kernel/**') }}
+
+      - name: Build kernel
+        if: steps.kernel.outputs.cache-hit != 'true'
+        run: kernel/build.sh out/kernel
+
+      - name: Build image
+        run: ./build-image.sh out/kernel out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: out/steamlink-debian.img.xz
+          archive: false
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # Read the versions from the finished image (the partition starts at 1 MiB)
+          xz -dc out/steamlink-debian.img.xz | tail -c +1048577 > "$RUNNER_TEMP/rootfs.ext3"
+          debian=$(debugfs -R 'cat /etc/debian_version' "$RUNNER_TEMP/rootfs.ext3" 2> /dev/null)
+          kernel=$(ls -1 kernel/*.config | sed 's#kernel/##; s/\.config$//' | sort -V | tail -n 1)
+          rm "$RUNNER_TEMP/rootfs.ext3"
+          if [ -z "$debian" ]; then
+            echo "Could not read /etc/debian_version from the image" >&2
+            exit 1
+          fi
+
+          tag="debian-$debian-linux-$kernel-build$RUN_NUMBER"
+          if [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
+            channel=--latest
+          else
+            channel=--prerelease
+          fi
+
+          {
+            echo "Debian $debian (trixie) server install with Linux $kernel-steam for the Valve Steam Link."
+            echo
+            echo "Flash \`steamlink-debian.img.xz\` to a USB stick (2 GB or larger), plug it into the Steam Link and power it on. Log in over SSH as \`corgo\` / \`steamlink\`."
+            echo
+            echo "Built from $GITHUB_REF_NAME at $GITHUB_SHA."
+          } > "$RUNNER_TEMP/notes.md"
+
+          gh release create "$tag" out/steamlink-debian.img.xz \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Debian $debian · Linux $kernel (build $RUN_NUMBER)" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            $channel
