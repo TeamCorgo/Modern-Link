@@ -1,30 +1,43 @@
-FROM docker.io/arm32v7/debian:bookworm
-# Prebuilt kernel from GitHub Releases: run kernel/fetch.sh first
+FROM docker.io/arm32v7/debian:trixie
+
 ARG KERNEL_VERSION=7.2.10
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Undo the Docker image's apt/dpkg tweaks so the system behaves like a normal install
+RUN rm -f /etc/apt/apt.conf.d/docker-* /etc/dpkg/dpkg.cfg.d/docker-*
+
+# Prebuilt kernel from GitHub Releases: run kernel/fetch.sh first
 COPY ./kernel-${KERNEL_VERSION}/ /boot/
 RUN mkdir -p /lib/modules && mv /boot/${KERNEL_VERSION}-steam /lib/modules/${KERNEL_VERSION}-steam
 
 COPY ./rootfs/boot/* /boot/
 COPY ./rootfs/usr/bin/* /usr/bin/
 COPY ./rootfs/steamlink/ /steamlink/
+COPY ./rootfs/etc/ /etc/
 
-# Add repositories
-RUN rm -rf /etc/apt/sources.list.d/* || true
-RUN echo "deb http://deb.debian.org/debian bookworm main non-free non-free-firmware" > /etc/apt/sources.list
-RUN echo "deb http://security.debian.org/debian-security bookworm-security main non-free non-free-firmware" >> /etc/apt/sources.list
-RUN echo "deb http://deb.debian.org/debian bookworm-updates main non-free non-free-firmware" >> /etc/apt/sources.list
+# Match a Debian server install: everything debootstrap installs (required and
+# important), "standard system utilities" (standard) and "SSH server"
+RUN apt-get update \
+ && apt-get install -y $(awk '/^Package:/ {p = $2} /^Priority: (required|important|standard)$/ {print p}' \
+        /var/lib/apt/lists/*_main_binary-armhf_Packages | sort -u) \
+ && apt-get install -y task-ssh-server
 
-# Install basic system components
-RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-timesyncd dbus ca-certificates dhcpcd5 nano vim openssh-server sudo ifupdown net-tools udev iputils-ping wget dosfstools unzip binutils libatomic1 initramfs-tools e2fsprogs parted firmware-libertas wireless-regdb dialog tasksel
+# Steam Link specifics: networking, firmware, nftables-based iptables, initramfs
+RUN apt-get install -y systemd-timesyncd dbus ca-certificates dhcpcd-base ifupdown sudo \
+    nftables iptables net-tools wget unzip binutils libatomic1 dosfstools e2fsprogs parted \
+    initramfs-tools firmware-libertas wireless-regdb dialog tasksel vim
 
-# Create initramfs
-RUN mkinitramfs -o /boot/initramfs-linux-steam.img ${KERNEL_VERSION}-steam
+RUN sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
+ && locale-gen \
+ && update-locale LANG=en_US.UTF-8
 
 RUN useradd -s /bin/bash -m corgo
 RUN echo "corgo:steamlink" | chpasswd
 
-# Add corgo user to sudoers
-RUN usermod -a -G sudo corgo
+# Same groups the installer gives the first user, plus sudo
+RUN for g in sudo cdrom floppy audio dip video plugdev users netdev; do \
+        if getent group "$g" > /dev/null; then usermod -a -G "$g" corgo; fi; \
+    done
 
 # Enable basic services
 RUN systemctl enable ssh
@@ -33,18 +46,20 @@ RUN systemctl enable networking
 RUN systemctl enable systemd-timesyncd
 
 # /etc/network/interfaces setup
-RUN echo "allow-hotplug eth0" > /etc/network/interfaces
-RUN echo "auto eth0" >> /etc/network/interfaces
-RUN echo "iface eth0 inet dhcp" >> /etc/network/interfaces
+RUN printf '%s\n' \
+    'source /etc/network/interfaces.d/*' \
+    '' \
+    'auto lo' \
+    'iface lo inet loopback' \
+    '' \
+    'auto eth0' \
+    'allow-hotplug eth0' \
+    'iface eth0 inet dhcp' > /etc/network/interfaces
 
-RUN apt-get --yes clean
+# Create initramfs once all packages and their hooks are in place
+RUN mkinitramfs -o /boot/initramfs-linux-steam.img ${KERNEL_VERSION}-steam
 
-# Update to Trixie 13
-RUN sed -i 's/bookworm/trixie/g' /etc/apt/sources.list
-RUN sed -i 's/main non-free/main contrib non-free/g' /etc/apt/sources.list
-RUN apt-get update
-RUN apt dist-upgrade -y
-RUN apt-get update
-RUN apt-get upgrade
+# Let package upgrades on the device start and restart services again
+RUN rm -f /usr/sbin/policy-rc.d
 
 RUN apt-get --yes clean

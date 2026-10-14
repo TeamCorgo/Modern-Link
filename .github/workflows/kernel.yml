@@ -2,17 +2,11 @@ name: Build kernel
 
 # Builds the kernel once per config and stores it as a GitHub Release, so the
 # image build can download it (kernel/fetch.sh) instead of recompiling.
+# Called by image.yml; can also be run on its own.
 
 on:
-  push:
-    branches: [latest]
-    paths:
-      - "kernel/**"
-      - ".github/workflows/kernel.yml"
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: kernel-${{ github.ref }}
 
 jobs:
   build:
@@ -59,8 +53,10 @@ jobs:
       - name: Publish release
         if: steps.existing.outputs.found != 'true'
         run: |
+          # Another run may have published the same config meanwhile, which is fine
           gh release create "$KERNEL_TAG" "out/kernel-$KERNEL_VERSION.tar.gz" \
             --target "$GITHUB_SHA" \
             --latest=false \
             --title "Linux $KERNEL_VERSION-steam ($KERNEL_TAG)" \
-            --notes "Prebuilt Steam Link kernel from \`kernel/$KERNEL_VERSION.config\` at $GITHUB_SHA. Download with \`kernel/fetch.sh\`."
+            --notes "Prebuilt Steam Link kernel from \`kernel/$KERNEL_VERSION.config\` at $GITHUB_SHA. Download with \`kernel/fetch.sh\`." \
+            || gh release view "$KERNEL_TAG" > /dev/null
