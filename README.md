@@ -8,7 +8,7 @@ debian@steamlink:~$ fastfetch
     ,g$$$$$$$$$$$$$$$P.        ----------------
   ,g$$P"         """Y$$.".     OS: Debian GNU/Linux bookworm 12.7 armv7l
  ,$$P'               `$$$.     Host: Valve Steam Link
-',$$P       ,ggs.     `$$b:    Kernel: Linux 6.1.115-steam
+',$$P       ,ggs.     `$$b:    Kernel: Linux 7.2.10-steam 
 `d$$'     ,$P"'   .    $$$     Uptime: 9 mins
  $$P      d$'     ,    $$$P    Packages: 191 (dpkg)
  $$:      $.   -    ,d$$'      Shell: bash 5.2.15
