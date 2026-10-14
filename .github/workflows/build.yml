@@ -1,0 +1,57 @@
+name: Build image
+
+# Builds steamlink-debian.img.xz on Debian. The kernel is kept in the Actions
+# cache and only recompiled when kernel/ changes.
+
+on:
+  push:
+    paths-ignore:
+      - "README.md"
+      - "LICENSE"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie
+      # Needed to register QEMU for ARM and to mount /proc etc. in the chroot
+      options: --privileged
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            arch-test bc bison ca-certificates curl dosfstools e2fsprogs fdisk flex gcc git \
+            kmod libc6-dev libelf-dev libssl-dev make mmdebstrap perl qemu-user-static xz-utils
+
+      - uses: actions/checkout@v5
+
+      - name: Enable ARM emulation
+        run: |
+          binfmt=/proc/sys/fs/binfmt_misc
+          [ -e "$binfmt/register" ] || mount -t binfmt_misc binfmt_misc "$binfmt"
+          if [ ! -e "$binfmt/qemu-arm" ]; then
+            qemu=$(command -v qemu-arm-static || command -v qemu-arm)
+            printf '%s' ":qemu-arm:M::\x7fELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:$qemu:F" > "$binfmt/register"
+          fi
+          arch-test armhf
+
+      - name: Restore kernel
+        id: kernel
+        uses: actions/cache@v5
+        with:
+          path: out/kernel
+          key: kernel-${{ hashFiles('kernel/**') }}
+
+      - name: Build kernel
+        if: steps.kernel.outputs.cache-hit != 'true'
+        run: kernel/build.sh out/kernel
+
+      - name: Build image
+        run: ./build-image.sh out/kernel out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: out/steamlink-debian.img.xz
+          archive: false
