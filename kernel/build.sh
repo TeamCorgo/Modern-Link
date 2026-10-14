@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# Builds the Steam Link kernel and packages it for the rootfs image.
+# Builds the Steam Link kernel. Run by the kernel stage of the Dockerfile.
 #
-# Usage: kernel/build.sh <linux-source-dir> <steamlink-sdk-dir> [output-dir]
+# Usage: kernel/build.sh <linux-source-dir> <steamlink-sdk-dir> <output-dir>
 #
-# Produces <output-dir>/kernel-<version>/ (zImage, dtb, config and the
-# <version>-steam modules directory) and a matching .tar.gz.
+# Produces <output-dir>/kernel-<version>/ with zImage, dtb, config and the
+# <version>-steam modules directory.
 
 set -euo pipefail
 
 KERNEL_DIR=$(cd "$(dirname "$0")" && pwd)
-eval "$("$KERNEL_DIR/release-info.sh")"
+KERNEL_VERSION=${KERNEL_VERSION:-$(cd "$KERNEL_DIR" && ls -1 *.config | sed 's/\.config$//' | sort -V | tail -n 1)}
 
 SRC=$(realpath "$1")
 SDK=$(realpath "$2")
-OUT=$(realpath -m "${3:-.}")
+OUT=$(realpath -m "$3")
 RELEASE="$KERNEL_VERSION-steam"
+
+if [ ! -f "$KERNEL_DIR/$KERNEL_VERSION.config" ]; then
+    echo "No kernel/$KERNEL_VERSION.config for kernel $KERNEL_VERSION" >&2
+    exit 1
+fi
 
 # Without depmod, modules_install only warns and ships no module index
 if ! PATH="$PATH:/sbin:/usr/sbin" command -v depmod > /dev/null; then
@@ -49,5 +54,4 @@ make -C "$SRC" INSTALL_MOD_PATH="$MODS" INSTALL_MOD_STRIP=1 modules_install
 mv "$MODS/lib/modules/$RELEASE" "$PKG/"
 rm -rf "$MODS" "$PKG/$RELEASE/build" "$PKG/$RELEASE/source"
 
-tar -C "$OUT" -czf "$OUT/kernel-$KERNEL_VERSION.tar.gz" "kernel-$KERNEL_VERSION"
-echo "Packaged $OUT/kernel-$KERNEL_VERSION.tar.gz"
+echo "Built $PKG"
