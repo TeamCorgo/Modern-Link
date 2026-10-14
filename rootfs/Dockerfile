@@ -1,6 +1,8 @@
 FROM docker.io/arm32v7/debian:bookworm
-COPY ./kernel-7.2.10/ /boot/
-RUN mkdir -p /lib/modules && mv /boot/7.2.10-steam /lib/modules/7.2.10-steam
+# Prebuilt kernel from GitHub Releases: run kernel/fetch.sh first
+ARG KERNEL_VERSION=7.2.10
+COPY ./kernel-${KERNEL_VERSION}/ /boot/
+RUN mkdir -p /lib/modules && mv /boot/${KERNEL_VERSION}-steam /lib/modules/${KERNEL_VERSION}-steam
 
 COPY ./rootfs/boot/* /boot/
 COPY ./rootfs/usr/bin/* /usr/bin/
@@ -16,7 +18,7 @@ RUN echo "deb http://deb.debian.org/debian bookworm-updates main non-free non-fr
 RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-timesyncd dbus ca-certificates dhcpcd5 nano vim openssh-server sudo ifupdown net-tools udev iputils-ping wget dosfstools unzip binutils libatomic1 initramfs-tools e2fsprogs parted firmware-libertas wireless-regdb dialog tasksel
 
 # Create initramfs
-RUN mkinitramfs -o /boot/initramfs-linux-steam.img 7.2.10-steam
+RUN mkinitramfs -o /boot/initramfs-linux-steam.img ${KERNEL_VERSION}-steam
 
 RUN useradd -s /bin/bash -m corgo
 RUN echo "corgo:steamlink" | chpasswd

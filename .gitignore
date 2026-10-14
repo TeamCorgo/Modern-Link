@@ -1,0 +1,6 @@
+# Kernel build inputs and outputs (prebuilt kernels live in GitHub Releases)
+/kernel-*/
+/kernel-*.tar.gz
+/linux-*/
+/steamlink-sdk/
+/out/
